@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "SKCT 연습 도구",
+  "version": "1.0",
+  "description": "링커리어 CBT 페이지 위에 계산기·메모장·그림판·타이머 패널을 띄웁니다.",
+  "content_scripts": [
+    {
+      "matches": ["https://cbt.linkareer.com/*"],
+      "js": ["tool.js"]
+    }
+  ]
+}
