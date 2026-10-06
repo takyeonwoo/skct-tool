@@ -21,8 +21,6 @@ const CSS = `
 
   .grip { display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:#222; color:#fff; cursor:move; user-select:none; font-size:12px; }
   .grip button { background:none; color:#fff; border:0; padding:0 6px; font-size:16px; }
-  .grip label { display:flex; align-items:center; gap:4px; cursor:pointer; margin-left:auto; margin-right:8px; }
-  .grip #site { color:#aaa; }
 
   #app { flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding:8px; }
   :host(.folded) .pad, :host(.folded) .calc { display:none; }
@@ -36,8 +34,12 @@ const CSS = `
   .bar .clocks b { font-size:28px; }
   .bar .clocks small { font-size:12px; color:#777; margin-right:6px; }
   .over { color:var(--red); }
-  .bar .btns { display:flex; gap:6px; }
-  .bar .btns button { flex:1; padding:6px 4px; }
+  /* 1줄: 시작 · 랩 (크게) / 2줄: 영역 종료 · 결과 · 초기화 (작게) */
+  .bar .btns { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
+  .bar .btns button { grid-column:span 2; padding:5px 4px; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar .btns #btnStart, .bar .btns #btnLap { grid-column:span 3; padding:8px 4px; font-size:14px; font-weight:600; }
+  :host(.one) .bar .btns #btnStart { grid-column:span 6; }
+  :host(.one) .bar .btns #btnRes, :host(.one) .bar .btns #btnReset { grid-column:span 3; }
 
   .pad { flex:1; min-height:0; display:flex; flex-direction:column; }
   .pad .tabs { display:flex; gap:6px; padding:6px; border-bottom:1px solid var(--line); }
@@ -47,7 +49,7 @@ const CSS = `
 
   .calc { height:min(40vh, 330px); display:flex; flex-direction:column; padding:8px; gap:6px; }
   .calc.kbd { outline:2px solid var(--blue); }
-  :host(.one) #btnLap, :host(.one) #btnEnd, :host(.one) #btnReset, :host(.one) .grip label { display:none; }
+  :host(.one) #btnLap, :host(.one) #btnEnd { display:none; }
   .calc .screen { text-align:right; padding:4px 8px; background:var(--bg); border-radius:6px; font-variant-numeric:tabular-nums; }
   .calc .expr { font-size:13px; color:#777; min-height:18px; }
   .calc .val { font-size:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -85,7 +87,6 @@ const HTML = `
 <div class="root">
   <div class="grip" id="grip" ${PANEL ? '' : 'hidden'}>
     <span id="gripTitle">SKCT 도구 ⠿</span>
-    <label title="사이트 문제 번호가 1 늘면 자동으로 랩"><input type="checkbox" id="auto"> 자동 랩 <span id="site"></span></label>
     <button id="fold" title="접기/펴기">−</button>
   </div>
   <div id="app">
@@ -177,10 +178,8 @@ function toggle() {
   else { if (S.phase === 'ready') S.acc = 0; S.startedAt = Date.now(); S.phase = 'running'; }
   save(); render();
 }
-let lastLap = 0;
 function lap() {
   if (oneMode || S.phase !== 'running') return;
-  lastLap = Date.now();
   cur().laps.push(elapsed());
   clearPad();
   if (cur().laps.length >= Q) endSection();
@@ -213,6 +212,7 @@ function render() {
   $('#btnStart').disabled = done;
   $('#btnLap').disabled = S.phase !== 'running';
   $('#btnEnd').disabled = !['running', 'paused'].includes(S.phase);
+  $('#btnReset').textContent = '초기화';
 }
 setInterval(() => { if (S.phase === 'running') render(); }, 200);
 
@@ -223,17 +223,13 @@ $('#btnEnd').onclick = () => {
 };
 $('#btnRes').onclick = showResults;
 $('#btnReset').onclick = () => {
+  if (oneMode) return resetOneSection();
   if (!confirm('지금 시험 기록을 저장하지 않고 처음으로 되돌릴까요? (지난 기록은 그대로 남아요)')) return;
   S = newExam(); save(); clearPad(); press('C'); render();
 };
 
-/* ---------- 자동 랩: 사이트의 "n/100" 문제 번호가 정확히 1 늘면 랩 ---------- */
-// 이전 문제로 가거나 답안표에서 번호를 건너뛰는 건 무시한다.
-let autoLap = load('autolap') ?? true, siteEl = null, siteNum = null;
-$('#auto').checked = autoLap;
-$('#auto').onchange = e => { autoLap = e.target.checked; try { localStorage.setItem('skct-autolap', autoLap); } catch {} };
-
-let siteTotal = 100;
+/* ---------- 링커리어 문제 번호 읽기 ---------- */
+let siteEl = null, siteTotal = 100;
 function readSite() {
   // "1/100", "66번 / 100" 모두 인식
   // ponytail: 못 찾으면 매번 전체 DOM을 훑음. 느려지면 카운터 셀렉터를 고정할 것
@@ -242,44 +238,60 @@ function readSite() {
   if (m) siteTotal = +m[2];
   return m ? +m[1] : null;
 }
+// 모의고사(/practice) · 한 문제씩(/onequestions) 화면이면 번호 인식 모드. 그 외 페이지는 수동 시험 모드
+const SITE_PAGE = /\/(practice|onequestions)\/(\d+)/;
+// 모의고사 화면 배치가 '여러 문제씩'이면 하단 숫자가 문제 번호가 아니라 페이지 번호(1/25)라서 문제별 시간을 나눌 수 없음 → 자동 기록 끄기
+// 판단: 하단 숫자의 전체 수가 답안표 문항 수(100)보다 작으면 페이지 번호
+let twoUp = false;
 if (PANEL) setInterval(() => {
+  setOneMode(SITE_PAGE.test(location.pathname));
+  if (!oneMode) return;
   const n = readSite();
-  setOneMode(location.pathname.includes('/onequestions'));
-  if (oneMode) { trackOne(n); siteNum = null; return; }
-  // 자동 랩은 모의고사 화면(/practice)에서만. 목록 페이지의 "1/3" 같은 페이지 번호에 반응하지 않게
-  if (autoLap && location.pathname.includes('/practice') && siteNum !== null && n === siteNum + 1 && Date.now() - lastLap > 1500) { // 1.5초 안에 ⌘↵ 눌렀으면 중복 방지
-    lap();
-  }
-  siteNum = n;
-  $('#site').textContent = n ? `(${n}번)` : '';
+  const omrRows = document.querySelectorAll('[class*="OMR_practice_OMR__"]').length || 100;
+  twoUp = location.pathname.includes('/practice') && n !== null && siteTotal < omrRows;
+  if (twoUp) { flushOne(); if ($('#res').hidden) render(); }
+  else trackOne(n);
 }, 300);
 
-/* ---------- 한 문제 모드 (/onequestions): 번호로 영역 판단, 문제가 바뀌면 걸린 시간 기록 ---------- */
+/* ---------- 번호 인식 모드: 화면의 문제 번호로 영역 판단, 보고 있는 문제에 시간을 쌓음 ---------- */
 const PACE = LIMIT / Q; // 문제당 45초
 const secOf = n => SECTIONS[Math.floor((n - 1) / Q)] ?? ''; // 100문제가 영역 순서대로 20개씩이라고 가정
-const examId = () => location.pathname.match(/onequestions\/(\d+)/)?.[1] ?? '';
-let oneMode = false, oneNum = null, oneExam = '', oneStart = 0, oneAcc = 0, onePaused = false;
+const examId = () => location.pathname.match(SITE_PAGE)?.[2] ?? '';
+// oneBase: 이 문제를 예전에 보며 이미 기록된 시간. 다시 오면 거기서부터 이어서 센다
+let oneMode = false, oneNum = null, oneExam = '', oneStart = 0, oneAcc = 0, oneBase = 0, onePaused = false;
 const O = load('one') || { log: [] };
 const saveOne = () => { try { localStorage.setItem('skct-one', JSON.stringify(O)); } catch {} };
 const oneElapsed = () => oneAcc + (onePaused || !oneNum ? 0 : Date.now() - oneStart);
 // 같은 모의고사 · 같은 영역에 쓴 시간 합계 (다시 본 문제 포함)
+const qTotal = (exam, n) => O.log.filter(r => r.exam === exam && r.n === n).reduce((a, r) => a + r.ms, 0);
 const secTotal = (exam, sec) => O.log.filter(r => r.exam === exam && secOf(r.n) === sec).reduce((a, r) => a + r.ms, 0);
 
 // 보던 문제를 그 문제의 모의고사 번호로 기록 (1초 미만으로 스쳐간 문제는 제외)
 function flushOne() {
-  const ms = oneElapsed();
+  const ms = oneElapsed() - oneBase; // 이번에 본 시간만 기록
   if (oneNum && ms > 1000) { O.log.unshift({ exam: oneExam, n: oneNum, ms, at: Date.now() }); saveOne(); }
   oneNum = null;
 }
 function setOneMode(on) {
   if (on === oneMode) return;
-  flushOne(); // 한 문제 모드를 떠날 때 마지막 문제도 기록
+  flushOne(); // 번호 인식 모드를 떠날 때 마지막 문제도 기록
   oneMode = on;
   host.classList.toggle('one', on);
-  $('#gripTitle').textContent = on ? 'SKCT 도구 · 한 문제 모드 ⠿' : 'SKCT 도구 ⠿';
+  $('#gripTitle').textContent = !on ? 'SKCT 도구 ⠿' : location.pathname.includes('/practice') ? 'SKCT 도구 · 모의고사 ⠿' : 'SKCT 도구 · 한 문제씩 ⠿';
   if (!$('#res').hidden) hideResults(); else render();
 }
-addEventListener('pagehide', () => { if (oneMode) flushOne(); }); // 탭 닫기 · 새로고침 때도 보던 문제 기록
+// 탭 닫기 · 새로고침 때는 보던 문제를 임시 저장 → 다시 열었을 때 같은 문제면 이어서 세고, 다른 문제면 그때 기록
+addEventListener('pagehide', () => {
+  if (!oneMode || !oneNum) return;
+  try { localStorage.setItem('skct-one-cur', JSON.stringify({ exam: oneExam, n: oneNum, ms: oneElapsed() - oneBase, paused: onePaused, at: Date.now() })); } catch {}
+});
+function resumeOne() {
+  const saved = load('one-cur');
+  if (!saved) return;
+  try { localStorage.removeItem('skct-one-cur'); } catch {}
+  if (saved.exam === oneExam && saved.n === oneNum) { oneAcc = oneBase + saved.ms; onePaused = saved.paused; }
+  else if (saved.ms > 1000) { O.log.unshift({ exam: saved.exam, n: saved.n, ms: saved.ms, at: saved.at }); saveOne(); }
+}
 function toggleOne() {
   if (onePaused) oneStart = Date.now(); else oneAcc = oneElapsed();
   onePaused = !onePaused;
@@ -289,16 +301,18 @@ function trackOne(n) {
   // 번호가 바뀌거나, 번호가 같아도 모의고사가 바뀌면 새 문제
   if (n && (n !== oneNum || examId() !== oneExam)) {
     flushOne();
-    oneNum = n; oneExam = examId(); oneStart = Date.now(); oneAcc = 0; clearPad(); // 일시정지 상태는 그대로 유지
+    oneNum = n; oneExam = examId(); oneStart = Date.now(); clearPad(); // 일시정지 상태는 그대로 유지
+    oneAcc = oneBase = qTotal(oneExam, n); // 전에 본 문제면 그 시간부터 이어서
+    resumeOne();
   }
   if ($('#res').hidden) render();
 }
 function renderOne() {
   const t = oneElapsed(), prev = O.log[0], sec = oneNum ? secOf(oneNum) : '';
-  const total = oneNum ? secTotal(oneExam, sec) + t : 0;
-  $('#secName').textContent = (sec || '문제 번호 찾는 중') + (onePaused ? ' · ⏸ 일시정지' : '');
+  const total = oneNum ? secTotal(oneExam, sec) + t - oneBase : 0;
+  $('#secName').textContent = twoUp ? '여러 문제 배치 · 자동 기록 꺼짐' : (sec || '문제 번호 찾는 중') + (onePaused ? ' · ⏸ 일시정지' : '');
   $('#qNum').textContent = oneNum ? `${oneNum} / ${siteTotal} 번` : '';
-  $('#sub').textContent = prev ? `직전 ${prev.n}번 · ${fmt(prev.ms)}` : '';
+  $('#sub').textContent = prev ? `직전 ${prev.n}번 · 총 ${fmt(qTotal(prev.exam, prev.n))}` : '';
   $('#qTime').textContent = fmt(t);
   $('#qTime').classList.toggle('over', t > PACE);
   $('#remainLabel').textContent = sec ? `${sec} 누적` : '';
@@ -306,6 +320,15 @@ function renderOne() {
   $('#remainWrap').classList.toggle('over', total > LIMIT);
   $('#btnStart').textContent = onePaused ? '▶ 계속' : '⏸ 일시정지';
   $('#btnStart').disabled = false;
+  $('#btnReset').textContent = '누적 초기화';
+}
+// 지금 보는 모의고사 · 영역의 기록을 지우고 현재 문제도 0부터
+function resetOneSection() {
+  if (!oneNum) return;
+  const sec = secOf(oneNum);
+  if (!confirm(`#${oneExam} ${sec} 누적 시간을 0으로 초기화할까요? (이 영역의 문제별 기록도 지워져요)`)) return;
+  O.log = O.log.filter(r => !(r.exam === oneExam && secOf(r.n) === sec));
+  saveOne(); oneAcc = oneBase = 0; oneStart = Date.now(); render();
 }
 function renderOneResults() {
   // 모의고사 · 영역별로 묶기. 같은 문제를 여러 번 봤으면 시간을 합친다
@@ -340,7 +363,7 @@ function renderOneResults() {
     </table>
   </div></div>`;
   $('#back').onclick = hideResults;
-  $('#clearLog').onclick = () => { if (confirm('한 문제 모드 기록을 모두 지울까요?')) { O.log = []; saveOne(); renderOneResults(); } };
+  $('#clearLog').onclick = () => { if (confirm('문제별 시간 기록을 모두 지울까요?')) { O.log = []; saveOne(); renderOneResults(); } };
 }
 
 /* ---------- 메모장 / 그림판 ---------- */
