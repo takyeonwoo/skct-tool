@@ -44,6 +44,7 @@ const CSS = `
   .pad canvas { flex:1; min-height:0; width:100%; touch-action:none; cursor:crosshair; }
 
   .calc { height:min(40vh, 330px); display:flex; flex-direction:column; padding:8px; gap:6px; }
+  .calc.kbd { outline:2px solid var(--blue); }
   .calc .screen { text-align:right; padding:4px 8px; background:var(--bg); border-radius:6px; font-variant-numeric:tabular-nums; }
   .calc .expr { font-size:13px; color:#777; min-height:18px; }
   .calc .val { font-size:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -313,8 +314,13 @@ $('#keys').onclick = e => { if (e.target.tagName === 'BUTTON') press(e.target.te
 press('C');
 
 /* ---------- 키보드 ---------- */
-// 패널 안에 포커스가 있을 때는 키 입력이 문제 페이지 단축키로 새지 않게 막는다.
-const inTool = () => document.activeElement === host;
+// 패널에 포커스가 있거나 계산기 위에 마우스가 있으면 키 입력을 도구가 가져가고,
+// 문제 페이지 단축키(1~5 선지 선택, Enter 채점)로 새지 않게 막는다.
+let calcHover = false;
+const calcBox = $('.calc');
+calcBox.onpointerenter = () => { calcHover = true; calcBox.classList.add('kbd'); };
+calcBox.onpointerleave = () => { calcHover = false; calcBox.classList.remove('kbd'); };
+const inTool = () => document.activeElement === host || calcHover;
 const KEYMAP = { '+': '+', '-': '−', '*': '×', '/': '÷', 'Enter': '=', '=': '=', 'Backspace': '←', 'Escape': 'C', 'Delete': 'C', '.': '.' };
 window.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); lap(); return; }
