@@ -229,11 +229,14 @@ $('#btnReset').onclick = () => {
 };
 
 /* ---------- 링커리어 문제 번호 읽기 ---------- */
-let siteEl = null, siteTotal = 100;
+let siteEl = null, siteTotal = 100, lastScan = 0;
 function readSite() {
-  // "1/100", "66번 / 100" 모두 인식
-  // ponytail: 못 찾으면 매번 전체 DOM을 훑음. 느려지면 카운터 셀렉터를 고정할 것
-  if (!siteEl?.isConnected) siteEl = [...document.body.querySelectorAll('*')].filter(e => /^\d+\s*번?\s*\/\s*\d+$/.test(e.textContent.trim())).at(-1);
+  // "1/100", "66번 / 100" 모두 인식. 번호 칸은 한 번 찾으면 기억하고 글자만 읽음
+  if (!siteEl?.isConnected) {
+    if (Date.now() - lastScan < 2000) return null; // 못 찾았을 때 전체 훑기는 2초에 한 번만
+    lastScan = Date.now();
+    siteEl = [...document.body.querySelectorAll('*')].filter(e => /^\d+\s*번?\s*\/\s*\d+$/.test(e.textContent.trim())).at(-1);
+  }
   const m = siteEl?.textContent.match(/(\d+)\s*번?\s*\/\s*(\d+)/);
   if (m) siteTotal = +m[2];
   return m ? +m[1] : null;
@@ -242,12 +245,15 @@ function readSite() {
 const SITE_PAGE = /\/(practice|onequestions)\/(\d+)/;
 // 모의고사 화면 배치가 '여러 문제씩'이면 하단 숫자가 문제 번호가 아니라 페이지 번호(1/25)라서 문제별 시간을 나눌 수 없음 → 자동 기록 끄기
 // 판단: 하단 숫자의 전체 수가 답안표 문항 수(100)보다 작으면 페이지 번호
-let twoUp = false;
+let twoUp = false, omrRows = 100, omrKey = '';
 if (PANEL) setInterval(() => {
   setOneMode(SITE_PAGE.test(location.pathname));
   if (!oneMode) return;
   const n = readSite();
-  const omrRows = document.querySelectorAll('[class*="OMR_practice_OMR__"]').length || 100;
+  if (omrKey !== location.pathname + siteTotal) { // 답안표 문항 수는 하단 전체 수(100 ↔ 25)나 페이지가 바뀔 때만 다시 셈
+    omrKey = location.pathname + siteTotal;
+    omrRows = document.querySelectorAll('[class*="OMR_practice_OMR__"]').length || 100;
+  }
   twoUp = location.pathname.includes('/practice') && n !== null && siteTotal < omrRows;
   if (twoUp) { flushOne(); if ($('#res').hidden) render(); }
   else trackOne(n);
