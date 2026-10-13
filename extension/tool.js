@@ -34,6 +34,10 @@ const CSS = `
   .bar .clocks b { font-size:28px; }
   .bar .clocks small { font-size:12px; color:#777; margin-right:6px; }
   .over { color:var(--red); }
+  .setup { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; font-size:13px; color:#555; }
+  .setup .row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+  .setup button { padding:4px 8px; font-size:13px; }
+  .setup input { width:56px; font:inherit; padding:3px 4px; border:1px solid var(--line); border-radius:6px; }
   /* 1줄: 시작 · 랩 (크게) / 2줄: 영역 종료 · 결과 · 초기화 (작게) */
   .bar .btns { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
   .bar .btns button { grid-column:span 2; padding:5px 4px; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -83,6 +87,8 @@ const CSS = `
   @media print { .noprint, .marks button:not(.on) { display:none !important; } .root { background:#fff; } }
 `;
 
+const SECTIONS = ['언어이해', '자료해석', '창의수리', '언어추리', '수열추리'];
+const SECTIONS_HTML = SECTIONS.map(n => `<button data-type="${n}">${n}</button>`).join('');
 const HTML = `
 <div class="root">
   <div class="grip" id="grip" ${PANEL ? '' : 'hidden'}>
@@ -91,6 +97,11 @@ const HTML = `
   </div>
   <div id="app">
     <div class="box bar">
+      <div class="setup" id="setup" hidden>
+        <div class="row" id="modes"><button data-mode="mock">모의고사 (5유형)</button><button data-mode="pick">유형 선택</button><button data-mode="custom">커스텀</button></div>
+        <div class="row" id="types">${SECTIONS_HTML}</div>
+        <div class="row" id="custom">유형당 <input id="cq" type="number" min="1" max="200"> 문항 · <input id="cm" type="number" min="1" max="300"> 분</div>
+      </div>
       <div class="info"><span id="secName"></span><span id="qNum"></span></div>
       <div class="clocks">
         <span><small>현재 문제</small><b id="qTime">00:00</b></span>
@@ -119,7 +130,7 @@ const HTML = `
       <canvas id="cv" hidden></canvas>
     </div>
     <div class="box calc">
-      <div class="screen"><div class="hist" id="hist"></div><div class="val" id="val">0</div></div>
+      <div class="screen"><div class="hist" id="calcHist"></div><div class="val" id="val">0</div></div>
       <div class="keys" id="keys">
         <button>C</button><button>←</button><button class="op">÷</button><button class="op">×</button>
         <button>7</button><button>8</button><button>9</button><button class="op">−</button>
@@ -141,7 +152,6 @@ root.adoptedStyleSheets = [sheet];
 root.innerHTML = HTML;
 document.documentElement.appendChild(host);
 
-const SECTIONS = ['언어이해', '자료해석', '창의수리', '언어추리', '수열추리'];
 const Q = 20, LIMIT = 15 * 60 * 1000;
 const $ = s => root.querySelector(s);
 const $$ = s => root.querySelectorAll(s);
@@ -167,12 +177,16 @@ grip.onpointerdown = e => {
 $('#fold').onclick = () => { $('#fold').textContent = host.classList.toggle('folded') ? '+' : '−'; };
 
 /* ---------- 상태 저장 ---------- */
-const newExam = () => ({ title: '', date: today(), sec: 0, phase: 'ready', acc: 0, startedAt: 0,
-  sections: SECTIONS.map(name => ({ name, laps: [], marks: Array(Q).fill(''), total: null })) });
+// tpl: 이전 시험의 설정(모드 · 유형 · 문항 수 · 시간)을 이어받음
+const MOCK = { mode: 'mock', sections: SECTIONS.map(name => ({ name, q: Q, limit: LIMIT })) };
+const newExam = (tpl = MOCK) => ({ title: '', date: today(), sec: 0, phase: 'ready', acc: 0, startedAt: 0, mode: tpl.mode,
+  sections: tpl.sections.map(({ name, q, limit }) => ({ name, q, limit, laps: [], marks: Array(q).fill(''), total: null })) });
 const load = k => { try { return JSON.parse(localStorage.getItem('skct-' + k)); } catch { return null; } };
 const save = () => { try { localStorage.setItem('skct-exam', JSON.stringify(S)); localStorage.setItem('skct-history', JSON.stringify(H)); } catch {} };
 let S = load('exam') || newExam();
 let H = load('history') || [];
+// 예전 기록엔 모드 · 문항 수 · 시간이 없음 → 모의고사 기본값
+[S, ...H].forEach(e => { e.mode ??= 'mock'; e.sections.forEach(s => { s.q ??= Q; s.limit ??= LIMIT; }); });
 
 /* ---------- 스톱워치 / 랩 ---------- */
 const cur = () => S.sections[S.sec];
@@ -188,16 +202,16 @@ function lap() {
   if (oneMode || S.phase !== 'running') return;
   cur().laps.push(elapsed());
   clearPad();
-  if (cur().laps.length >= Q) endSection();
+  if (cur().laps.length >= cur().q) endSection();
   save(); render();
 }
 function endSection() {
   const s = cur();
   s.total = elapsed();
-  for (let i = s.laps.length; i < Q; i++) s.marks[i] = '-'; // 랩 안 찍은 문제 = 안 품
+  for (let i = s.laps.length; i < s.q; i++) s.marks[i] = '-'; // 랩 안 찍은 문제 = 안 품
   S.acc = 0; S.sec++;
   clearPad();
-  if (S.sec >= SECTIONS.length) { S.phase = 'finished'; save(); showResults(); }
+  if (S.sec >= S.sections.length) { S.phase = 'finished'; save(); showResults(); }
   else { S.phase = 'running'; S.startedAt = Date.now(); } // 다음 영역 바로 시작
 }
 
@@ -207,10 +221,10 @@ function render() {
   const done = S.phase === 'finished';
   const s = done ? null : cur();
   const t = done ? 0 : elapsed();
-  $('#secName').textContent = done ? '시험 종료' : `${S.sec + 1}/5 ${s.name}${S.phase === 'paused' ? ' (일시정지)' : ''}`;
-  $('#qNum').textContent = done ? '' : `${Math.min(s.laps.length + 1, Q)} / ${Q} 번`;
+  $('#secName').textContent = done ? '시험 종료' : `${S.sec + 1}/${S.sections.length} ${s.name}${S.phase === 'paused' ? ' (일시정지)' : ''}`;
+  $('#qNum').textContent = done ? '' : `${Math.min(s.laps.length + 1, s.q)} / ${s.q} 번`;
   $('#qTime').textContent = fmt(done ? 0 : t - (s.laps.at(-1) || 0));
-  const left = LIMIT - t, over = left < 0;
+  const left = (s?.limit ?? LIMIT) - t, over = left < 0;
   $('#remainLabel').textContent = over ? '시간 초과' : '남은 시간';
   $('#remain').textContent = (over ? '+' : '') + fmt(left);
   $('#remainWrap').classList.toggle('over', over);
@@ -219,7 +233,36 @@ function render() {
   $('#btnLap').disabled = S.phase !== 'running';
   $('#btnEnd').disabled = !['running', 'paused'].includes(S.phase);
   $('#btnReset').textContent = '초기화';
+  renderSetup();
 }
+
+/* ---------- 시험 설정 (단독 실행 · 시작 전에만): 모의고사 / 유형 선택 / 커스텀 ---------- */
+function renderSetup() {
+  $('#setup').hidden = PANEL || S.phase !== 'ready';
+  if ($('#setup').hidden) return;
+  $$('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
+  $$('#types button').forEach(b => b.classList.toggle('on', S.sections.some(s => s.name === b.dataset.type)));
+  $('#types').hidden = S.mode === 'mock';
+  $('#custom').hidden = S.mode !== 'custom';
+  $('#cq').value = S.sections[0].q; $('#cm').value = S.sections[0].limit / 60000;
+}
+function applySetup(mode, names) {
+  const custom = mode === 'custom';
+  const q = custom ? Math.min(200, Math.max(1, Math.round(+$('#cq').value) || Q)) : Q;
+  const limit = custom ? Math.min(300, Math.max(1, +$('#cm').value || 15)) * 60000 : LIMIT;
+  const keep = { title: S.title, date: S.date };
+  S = Object.assign(newExam({ mode, sections: SECTIONS.filter(n => mode === 'mock' || names.includes(n)).map(name => ({ name, q, limit })) }), keep);
+  save(); render();
+}
+const setupNames = () => S.sections.map(s => s.name);
+$('#modes').onclick = e => { const m = e.target.dataset?.mode; if (m) applySetup(m, setupNames()); };
+$('#types').onclick = e => {
+  const n = e.target.dataset?.type, names = setupNames();
+  if (!n) return;
+  const next = names.includes(n) ? names.filter(x => x !== n) : [...names, n];
+  if (next.length) applySetup(S.mode, next); // 최소 한 유형은 남김
+};
+$('#cq').onchange = $('#cm').onchange = () => applySetup(S.mode, setupNames());
 setInterval(() => { if (S.phase === 'running') render(); }, 200);
 
 $('#btnStart').onclick = () => oneMode ? toggleOne() : toggle();
@@ -231,7 +274,7 @@ $('#btnRes').onclick = showResults;
 $('#btnReset').onclick = () => {
   if (oneMode) return resetOneSection();
   if (!confirm('지금 시험 기록을 저장하지 않고 처음으로 되돌릴까요? (지난 기록은 그대로 남아요)')) return;
-  S = newExam(); save(); clearPad(); press('C'); render();
+  S = newExam(S); save(); clearPad(); press('C'); render();
 };
 
 /* ---------- 링커리어 문제 번호 읽기 ---------- */
@@ -448,7 +491,7 @@ function press(k) {
     if (isFinite(r)) hist = [`${showToks(t)} = ${withCommas(String(r))}`, hist[0]];
     val = String(r); toks = []; fresh = true;
   }
-  $('#hist').innerHTML = [hist[1], hist[0]].map(h => `<div>${esc(h)}</div>`).join('');
+  $('#calcHist').innerHTML = [hist[1], hist[0]].map(h => `<div>${esc(h)}</div>`).join('');
   if (!isFinite(+val)) { val = '0'; toks = []; fresh = true; $('#val').textContent = '오류'; return; }
   const v = $('#val');
   v.textContent = toks.length && fresh ? showToks(toks) : [...toks.length ? [showToks(toks)] : [], withCommas(val)].join(' '); // 식 전체를 한 줄로
@@ -511,6 +554,7 @@ function renderResults() {
     <button id="back">← 돌아가기</button>
     <select id="hist">${opts}</select>
     <span class="spacer"></span>
+    <button id="delExam" ${E === S ? 'hidden' : ''}>이 기록 삭제</button>
     <button id="print" ${PANEL ? 'hidden' : ''}>인쇄 / PDF</button>
     <button id="newExam" class="primary">새 시험</button>
   </div>
@@ -520,7 +564,7 @@ function renderResults() {
   </div>
 
   <div class="box card">
-    <div class="score">${tot} <span>/ ${SECTIONS.length * Q}</span></div>
+    <div class="score">${tot} <span>/ ${E.sections.reduce((a, s) => a + s.q, 0)}</span></div>
     <div class="stats">
       <span>✅ 정답 ${cnt.o}</span><span>❌ 오답 ${cnt.x}</span><span>⬜ 안 품 ${cnt['-']}</span>
       ${cnt[''] ? `<span class="warn">채점 안 함 ${cnt['']}</span>` : ''}
@@ -531,22 +575,22 @@ function renderResults() {
     <table>
       <tr><th>영역</th><th>점수</th><th>소요 시간</th><th>시간 초과</th><th>틀린 문제</th><th>안 푼 문제</th></tr>
       ${secs.map(({ s, total, score, wrong, skip }) => `<tr>
-        <td>${s.name}</td><td><b>${score}</b> / ${Q}</td><td>${total ? fmt(total) : '-'}</td>
-        <td>${total > LIMIT ? `<span class="warn">⚠️ +${fmt(total - LIMIT)}</span>` : total ? '없음' : '-'}</td>
+        <td>${s.name}</td><td><b>${score}</b> / ${s.q}</td><td>${total ? fmt(total) : '-'}</td>
+        <td>${total > s.limit ? `<span class="warn">⚠️ +${fmt(total - s.limit)}</span>` : total ? '없음' : '-'}</td>
         <td>${wrong.join(', ') || '-'}</td><td>${skip.join(', ') || '-'}</td></tr>`).join('')}
     </table>
   </div>
 
   ${secs.map(({ s, times, total, marks, slow, max }, si) => `
   <div class="box card"><details open>
-    <summary>${s.name} · ${total ? fmt(total) : '미응시'}${total > LIMIT ? ` <span class="warn">⚠️ 시간 초과 +${fmt(total - LIMIT)}</span>` : ''}
+    <summary>${s.name} · ${total ? fmt(total) : '미응시'}${total > s.limit ? ` <span class="warn">⚠️ 시간 초과 +${fmt(total - s.limit)}</span>` : ''}
       ${times.length ? ` · 문제당 평균 ${fmt(times.reduce((a, b) => a + b, 0) / times.length)}` : ''}</summary>
     <table>
       <tr><th>번호</th><th>소요 시간</th><th class="barcol"></th><th>비고</th><th>채점</th></tr>
       ${marks.map((m, i) => m === null ? '' : `<tr class="${slow.includes(times[i]) ? 'slow' : ''}">
         <td>${i + 1}</td><td>${times[i] != null ? fmt(times[i]) : '-'}</td>
         <td>${times[i] != null ? `<div class="tbar" data-w="${times[i] / max * 100}"></div>` : ''}</td>
-        <td>${s.laps[i] > LIMIT ? '<span class="warn">⏰ 15분 이후 풂</span>' : times[i] == null ? '안 품' : ''}</td>
+        <td>${s.laps[i] > s.limit ? `<span class="warn">⏰ ${s.limit / 60000}분 이후 풂</span>` : times[i] == null ? '안 품' : ''}</td>
         <td class="marks">
           <button class="o ${m === 'o' ? 'on' : ''}" data-s="${si}" data-q="${i}" data-m="o">O</button>
           <button class="x ${m === 'x' ? 'on' : ''}" data-s="${si}" data-q="${i}" data-m="x">X</button>
@@ -561,10 +605,15 @@ function renderResults() {
   $('#back').onclick = hideResults;
   $('#print').onclick = () => print();
   $('#hist').onchange = e => { view = +e.target.value < 0 ? S : H[+e.target.value]; renderResults(); };
+  // 지난 기록만 삭제 (현재 시험은 '초기화'로)
+  $('#delExam').onclick = () => {
+    if (!confirm(`${E.date} · ${E.title || '제목 없음'} 기록을 삭제할까요? 되돌릴 수 없어요.`)) return;
+    H.splice(H.indexOf(E), 1); save(); view = S; renderResults();
+  };
   $('#newExam').onclick = () => {
     if (!confirm('새 시험을 시작할까요? 지금 기록은 지난 기록에 보관돼요.')) return;
     if (S.sections.some(s => s.laps.length || s.total)) H.unshift(S);
-    S = newExam(); save(); clearPad(); view = S;
+    S = newExam(S); save(); clearPad(); view = S;
     hideResults();
   };
   $$('.marks button').forEach(b => b.onclick = () => {
