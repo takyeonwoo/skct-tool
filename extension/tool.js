@@ -51,6 +51,7 @@ const CSS = `
   .calc.kbd { outline:2px solid var(--blue); }
   :host(.one) #btnLap, :host(.one) #btnEnd { display:none; }
   .calc .screen { text-align:right; padding:4px 8px; background:var(--bg); border-radius:6px; font-variant-numeric:tabular-nums; }
+  .calc .hist div { font-size:11px; color:#aaa; height:14px; line-height:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .calc .expr { font-size:13px; color:#777; min-height:18px; }
   .calc .val { font-size:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .calc .keys { flex:1; display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(5,1fr); gap:5px; }
@@ -119,7 +120,7 @@ const HTML = `
       <canvas id="cv" hidden></canvas>
     </div>
     <div class="box calc">
-      <div class="screen"><div class="expr" id="expr"></div><div class="val" id="val">0</div></div>
+      <div class="screen"><div class="hist" id="hist"></div><div class="expr" id="expr"></div><div class="val" id="val">0</div></div>
       <div class="keys" id="keys">
         <button>C</button><button>←</button><button class="op">÷</button><button class="op">×</button>
         <button>7</button><button>8</button><button>9</button><button class="op">−</button>
@@ -419,35 +420,48 @@ cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId); last = [e.offsetX, 
 cv.onpointermove = e => { if (last) stroke(e); };
 cv.onpointerup = cv.onpointercancel = () => last = null;
 
-/* ---------- 계산기 (윈도우 기본 계산기처럼 즉시 계산) ---------- */
-let val = '0', acc = null, op = null, fresh = true;
+/* ---------- 계산기 (× ÷ 먼저 계산, 최근 기록 2개 표시) ---------- */
+let val = '0', toks = [], fresh = true, hist = []; // toks: 입력 중인 식 [수, 연산자, 수, 연산자 ...]
 const round = x => +x.toPrecision(12); // 0.1+0.2 = 0.3
 const calc = (a, o, b) => o === '+' ? a + b : o === '−' ? a - b : o === '×' ? a * b : a / b;
 const withCommas = s => s.replace(/^(-?\d+)/, i => i.replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+const evalToks = t => {
+  const a = [t[0]]; // × ÷ 먼저 처리
+  for (let i = 1; i < t.length; i += 2) '×÷'.includes(t[i]) ? a.push(calc(a.pop(), t[i], t[i + 1])) : a.push(t[i], t[i + 1]);
+  let r = a[0];
+  for (let i = 1; i < a.length; i += 2) r = calc(r, a[i], a[i + 1]);
+  return round(r);
+};
+const showToks = t => t.map(x => typeof x === 'number' ? withCommas(String(x)) : x).join(' ');
 
 function press(k) {
   if (/\d/.test(k)) { val = fresh || val === '0' ? k : val + k; fresh = false; }
   else if (k === '.') { if (fresh) { val = '0.'; fresh = false; } else if (!val.includes('.')) val += '.'; }
-  else if (k === 'C') { val = '0'; acc = op = null; fresh = true; }
+  else if (k === 'C') { val = '0'; toks = []; fresh = true; }
   else if (k === '←') { if (!fresh) { val = val.slice(0, -1); if (val === '' || val === '-') val = '0'; } }
   else if ('+−×÷'.includes(k)) {
-    if (op && !fresh) { acc = round(calc(acc, op, +val)); val = String(acc); }
-    else if (!op) acc = +val;
-    op = k; fresh = true;
+    if (toks.length && fresh) toks[toks.length - 1] = k; // 연산자 연달아 누르면 교체
+    else toks.push(+val, k);
+    fresh = true;
   }
-  else if (k === '=' && op) { val = String(round(calc(acc, op, +val))); acc = op = null; fresh = true; }
-  if (!isFinite(+val)) { val = '0'; acc = op = null; fresh = true; $('#val').textContent = '오류'; $('#expr').textContent = ''; return; }
+  else if (k === '=' && toks.length) {
+    const t = [...toks, +val], r = evalToks(t);
+    if (isFinite(r)) hist = [`${showToks(t)} = ${withCommas(String(r))}`, hist[0]];
+    val = String(r); toks = []; fresh = true;
+  }
+  $('#hist').innerHTML = [hist[1], hist[0]].map(h => `<div>${esc(h)}</div>`).join('');
+  if (!isFinite(+val)) { val = '0'; toks = []; fresh = true; $('#val').textContent = '오류'; $('#expr').textContent = ''; return; }
   $('#val').textContent = withCommas(val);
-  $('#expr').textContent = op ? `${withCommas(String(acc))} ${op}` : '';
+  $('#expr').textContent = showToks(toks);
 }
 $('#keys').onclick = e => { if (e.target.tagName === 'BUTTON') press(e.target.textContent); };
 
 // 자체 점검: 계산기 로직이 깨지면 콘솔에 에러
-[['0.1+0.2=', '0.3'], ['12×3−6÷2=', '15'], ['5÷0=', '0'], ['123←←4=', '14']].forEach(([keys, want]) => {
+[['0.1+0.2=', '0.3'], ['10−2×3=', '4'], ['12×3−6÷2=', '33'], ['5+×2=', '10'], ['5÷0=', '0'], ['123←←4=', '14']].forEach(([keys, want]) => {
   press('C'); [...keys.replace('=', '')].forEach(press); if (keys.endsWith('=')) press('=');
   console.assert(val === want, `계산기: ${keys} → ${val}, 기대값 ${want}`);
 });
-press('C');
+hist = []; press('C');
 
 /* ---------- 키보드 ---------- */
 // 패널에 포커스가 있거나 계산기 위에 마우스가 있으면 키 입력을 도구가 가져가고,
