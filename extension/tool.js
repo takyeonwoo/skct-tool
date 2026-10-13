@@ -52,8 +52,7 @@ const CSS = `
   :host(.one) #btnLap, :host(.one) #btnEnd { display:none; }
   .calc .screen { text-align:right; padding:4px 8px; background:var(--bg); border-radius:6px; font-variant-numeric:tabular-nums; }
   .calc .hist div { font-size:11px; color:#aaa; height:14px; line-height:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .calc .expr { font-size:13px; color:#777; min-height:18px; }
-  .calc .val { font-size:26px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .calc .val { font-size:26px; overflow:hidden; white-space:nowrap; } /* 식이 길면 끝부분(입력 중인 곳)이 보이게 스크롤 */
   .calc .keys { flex:1; display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(5,1fr); gap:5px; }
   .calc .keys button { font-size:18px; padding:0; }
   .calc .keys .op { background:#eef1f5; }
@@ -120,7 +119,7 @@ const HTML = `
       <canvas id="cv" hidden></canvas>
     </div>
     <div class="box calc">
-      <div class="screen"><div class="hist" id="hist"></div><div class="expr" id="expr"></div><div class="val" id="val">0</div></div>
+      <div class="screen"><div class="hist" id="hist"></div><div class="val" id="val">0</div></div>
       <div class="keys" id="keys">
         <button>C</button><button>←</button><button class="op">÷</button><button class="op">×</button>
         <button>7</button><button>8</button><button>9</button><button class="op">−</button>
@@ -450,9 +449,10 @@ function press(k) {
     val = String(r); toks = []; fresh = true;
   }
   $('#hist').innerHTML = [hist[1], hist[0]].map(h => `<div>${esc(h)}</div>`).join('');
-  if (!isFinite(+val)) { val = '0'; toks = []; fresh = true; $('#val').textContent = '오류'; $('#expr').textContent = ''; return; }
-  $('#val').textContent = withCommas(val);
-  $('#expr').textContent = showToks(toks);
+  if (!isFinite(+val)) { val = '0'; toks = []; fresh = true; $('#val').textContent = '오류'; return; }
+  const v = $('#val');
+  v.textContent = toks.length && fresh ? showToks(toks) : [...toks.length ? [showToks(toks)] : [], withCommas(val)].join(' '); // 식 전체를 한 줄로
+  v.scrollLeft = v.scrollWidth;
 }
 $('#keys').onclick = e => { if (e.target.tagName === 'BUTTON') press(e.target.textContent); };
 
