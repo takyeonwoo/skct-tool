@@ -155,7 +155,13 @@ grip.onpointerdown = e => {
   if (e.target.closest('button, label')) return;
   const r = host.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
   grip.setPointerCapture(e.pointerId);
-  grip.onpointermove = m => { host.style.left = m.clientX - dx + 'px'; host.style.top = m.clientY - dy + 'px'; host.style.right = 'auto'; };
+  // 손잡이(검은 막대)가 화면 밖으로 나가지 않게 위치 제한
+  const clamp = (v, max) => Math.min(Math.max(v, 0), Math.max(max, 0));
+  grip.onpointermove = m => {
+    host.style.left = clamp(m.clientX - dx, innerWidth - r.width) + 'px';
+    host.style.top = clamp(m.clientY - dy, innerHeight - grip.offsetHeight) + 'px';
+    host.style.right = 'auto';
+  };
   grip.onpointerup = () => grip.onpointermove = null;
 };
 $('#fold').onclick = () => { $('#fold').textContent = host.classList.toggle('folded') ? '+' : '−'; };
