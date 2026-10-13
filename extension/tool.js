@@ -8,9 +8,9 @@ const CSS = `
   :host { all:initial; position:fixed; z-index:2147483647; font-family:-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color:#222; font-size:14px; line-height:1.4;
     --line:#d0d4da; --bg:#f4f5f7; --red:#d63031; --blue:#2563eb; --green:#16a34a; }
   :host(.full) { inset:0; }
-  :host(.panel) { top:12px; right:12px; width:380px; height:calc(100vh - 24px); border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; }
-  :host(.panel.folded) { height:auto; }
-  :host(.wide) { top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:auto !important; height:auto !important; border-radius:0; }
+  :host(.panel) { top:12px; left:calc(100vw - 392px); width:380px; height:calc(100vh - 24px); min-width:280px; min-height:200px; max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; resize:both; } /* 오른쪽 아래 모서리를 끌어 크기 조절 */
+  :host(.panel.folded) { height:auto !important; min-height:0; resize:none; }
+  :host(.wide) { top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:auto !important; height:auto !important; border-radius:0; resize:none; }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   .root { height:100%; display:flex; flex-direction:column; background:var(--bg); }
