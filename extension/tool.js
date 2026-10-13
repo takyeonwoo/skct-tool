@@ -8,7 +8,7 @@ const CSS = `
   :host { all:initial; position:fixed; z-index:2147483647; font-family:-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color:#222; font-size:14px; line-height:1.4;
     --line:#d0d4da; --bg:#f4f5f7; --red:#d63031; --blue:#2563eb; --green:#16a34a; }
   :host(.full) { inset:0; }
-  :host(.panel) { top:12px; left:calc(100vw - 392px); width:380px; height:calc(100vh - 24px); min-width:280px; min-height:min(600px, 100vh); max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; resize:both; } /* 오른쪽 아래 모서리를 끌어 크기 조절 */
+  :host(.panel) { top:12px; left:calc(100vw - 392px); width:380px; height:calc(100vh - 24px); min-width:280px; min-height:min(660px, 100vh); max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; resize:both; } /* 오른쪽 아래 모서리를 끌어 크기 조절 */
   :host(.panel.folded) { height:auto !important; min-height:0; resize:none; }
   :host(.wide) { top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:auto !important; height:auto !important; border-radius:0; resize:none; }
   * { box-sizing:border-box; }
@@ -49,11 +49,15 @@ const CSS = `
   :host(.one) .bar .btns #btnStart { grid-column:span 6; }
   :host(.one) .bar .btns #btnRes, :host(.one) .bar .btns #btnReset { grid-column:span 3; }
 
-  .pad { flex:1; min-height:120px; display:flex; flex-direction:column; } /* 패널을 줄이면 계산기가 먼저 작아짐 */
-  .pad .tabs { display:flex; gap:6px; padding:6px; border-bottom:1px solid var(--line); }
+  .pad { flex:1; display:flex; flex-direction:column; } /* 최소 높이 = 탭 + 쓰는 칸 70px. 패널을 줄이면 계산기가 먼저 작아짐 */
+  .pad .tabs { display:flex; flex-wrap:wrap; gap:6px; padding:6px; border-bottom:1px solid var(--line); } /* 좁으면 펜 · 지우개 줄이 아래로 */
+  .pad .tabs button { white-space:nowrap; }
   .pad .tools { margin-left:auto; display:flex; gap:6px; }
-  .pad textarea { flex:1; border:0; resize:none; padding:10px; font:inherit; font-size:15px; outline:none; border-radius:0 0 8px 8px; }
-  .pad canvas { flex:1; min-height:0; width:100%; touch-action:none; cursor:crosshair; }
+  /* 쓰는 칸: 메모 · 그림판을 꽉 채워 띄움 (캔버스 해상도가 칸 높이를 밀어 올리지 않게) */
+  .pad .surface { flex:1; min-height:70px; position:relative; }
+  .pad textarea, .pad canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .pad textarea { border:0; resize:none; padding:10px; font:inherit; font-size:15px; outline:none; border-radius:0 0 8px 8px; }
+  .pad canvas { touch-action:none; cursor:crosshair; }
 
   .calc { height:min(40vh, 330px); min-height:250px; display:flex; flex-direction:column; padding:8px; gap:6px; }
   .calc.kbd { outline:2px solid var(--blue); }
@@ -130,8 +134,7 @@ const HTML = `
           <button id="clearCv">전체 지우기</button>
         </div>
       </div>
-      <textarea id="memo" placeholder="메모"></textarea>
-      <canvas id="cv" hidden></canvas>
+      <div class="surface"><textarea id="memo" placeholder="메모"></textarea><canvas id="cv" hidden></canvas></div>
     </div>
     <div class="split" id="split" title="끌어서 그림판 · 계산기 크기 조절"></div>
     <div class="box calc">
@@ -517,12 +520,12 @@ hist = []; press('C');
 let calcHover = false;
 const calcBox = $('.calc');
 
-// 경계를 끌면 계산기 높이가 바뀌고 그림판이 나머지를 차지 (최소값은 CSS .calc · .pad min-height와 같게: 계산기 250px, 그림판 칸 120px)
+// 경계를 끌면 계산기 높이가 바뀌고 그림판이 나머지를 차지 (최소값은 CSS와 같게: 계산기 250px, 그림판 = 탭 + 쓰는 칸 70px)
 const split = $('#split');
 split.onpointerdown = e => {
   split.setPointerCapture(e.pointerId);
   const top = $('.pad').getBoundingClientRect().top, bottom = calcBox.getBoundingClientRect().bottom;
-  split.onpointermove = m => calcBox.style.height = Math.max(250, Math.min(bottom - m.clientY, bottom - top - 120 - 8)) + 'px';
+  split.onpointermove = m => calcBox.style.height = Math.max(250, Math.min(bottom - m.clientY, bottom - top - $('.pad .tabs').offsetHeight - 72 - 8)) + 'px';
   split.onpointerup = () => split.onpointermove = null;
 };
 calcBox.onpointerenter = () => { calcHover = true; calcBox.classList.add('kbd'); };
