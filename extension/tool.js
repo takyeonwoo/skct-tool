@@ -8,7 +8,7 @@ const CSS = `
   :host { all:initial; position:fixed; z-index:2147483647; font-family:-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color:#222; font-size:14px; line-height:1.4;
     --line:#d0d4da; --bg:#f4f5f7; --red:#d63031; --blue:#2563eb; --green:#16a34a; }
   :host(.full) { inset:0; }
-  :host(.panel) { top:12px; left:calc(100vw - 392px); width:380px; height:calc(100vh - 24px); min-width:280px; min-height:200px; max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; resize:both; } /* 오른쪽 아래 모서리를 끌어 크기 조절 */
+  :host(.panel) { top:12px; left:calc(100vw - 392px); width:380px; height:calc(100vh - 24px); min-width:280px; min-height:min(600px, 100vh); max-width:100vw; max-height:100vh; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.25); overflow:hidden; resize:both; } /* 오른쪽 아래 모서리를 끌어 크기 조절 */
   :host(.panel.folded) { height:auto !important; min-height:0; resize:none; }
   :host(.wide) { top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:auto !important; height:auto !important; border-radius:0; resize:none; }
   * { box-sizing:border-box; }
@@ -22,8 +22,12 @@ const CSS = `
   .grip { display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:#222; color:#fff; cursor:move; user-select:none; font-size:12px; }
   .grip button { background:none; color:#fff; border:0; padding:0 6px; font-size:16px; }
 
-  #app { flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; padding:8px; }
-  :host(.folded) .pad, :host(.folded) .calc { display:none; }
+  #app { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; padding:8px; }
+  :host(.folded) .pad, :host(.folded) .calc, :host(.folded) .split { display:none; }
+  /* 그림판 ↔ 계산기 경계: 위아래로 끌어 크기 조절 (gap 안에 겹쳐 놓아 간격은 그대로) */
+  .split { height:10px; margin:-9px 0; flex-shrink:0; cursor:row-resize; touch-action:none; display:flex; align-items:center; justify-content:center; }
+  .split::after { content:''; width:40px; height:4px; border-radius:2px; background:var(--line); }
+  .split:hover::after { background:#999; }
   .box { background:#fff; border:1px solid var(--line); border-radius:8px; }
 
   .bar { padding:10px 12px; }
@@ -45,13 +49,13 @@ const CSS = `
   :host(.one) .bar .btns #btnStart { grid-column:span 6; }
   :host(.one) .bar .btns #btnRes, :host(.one) .bar .btns #btnReset { grid-column:span 3; }
 
-  .pad { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .pad { flex:1; min-height:120px; display:flex; flex-direction:column; } /* 패널을 줄이면 계산기가 먼저 작아짐 */
   .pad .tabs { display:flex; gap:6px; padding:6px; border-bottom:1px solid var(--line); }
   .pad .tools { margin-left:auto; display:flex; gap:6px; }
   .pad textarea { flex:1; border:0; resize:none; padding:10px; font:inherit; font-size:15px; outline:none; border-radius:0 0 8px 8px; }
   .pad canvas { flex:1; min-height:0; width:100%; touch-action:none; cursor:crosshair; }
 
-  .calc { height:min(40vh, 330px); display:flex; flex-direction:column; padding:8px; gap:6px; }
+  .calc { height:min(40vh, 330px); min-height:250px; display:flex; flex-direction:column; padding:8px; gap:6px; }
   .calc.kbd { outline:2px solid var(--blue); }
   :host(.one) #btnLap, :host(.one) #btnEnd { display:none; }
   .calc .screen { text-align:right; padding:4px 8px; background:var(--bg); border-radius:6px; font-variant-numeric:tabular-nums; }
@@ -129,6 +133,7 @@ const HTML = `
       <textarea id="memo" placeholder="메모"></textarea>
       <canvas id="cv" hidden></canvas>
     </div>
+    <div class="split" id="split" title="끌어서 그림판 · 계산기 크기 조절"></div>
     <div class="box calc">
       <div class="screen"><div class="hist" id="calcHist"></div><div class="val" id="val">0</div></div>
       <div class="keys" id="keys">
@@ -441,7 +446,7 @@ $('#clearCv').onclick = clearCanvas;
 // 캔버스 크기를 화면에 맞추되, 리사이즈 때 그린 내용 유지
 new ResizeObserver(() => {
   const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
-  if (!r.width) return;
+  if (!r.width || !r.height) return; // 숨김 · 높이 0일 땐 그대로 둠 (0 크기 캔버스를 복사하면 에러 나서 그 뒤로 못 그림)
   const tmp = document.createElement('canvas');
   tmp.width = cv.width; tmp.height = cv.height;
   tmp.getContext('2d').drawImage(cv, 0, 0);
@@ -511,6 +516,15 @@ hist = []; press('C');
 // 문제 페이지 단축키(1~5 선지 선택, Enter 채점)로 새지 않게 막는다.
 let calcHover = false;
 const calcBox = $('.calc');
+
+// 경계를 끌면 계산기 높이가 바뀌고 그림판이 나머지를 차지 (최소값은 CSS .calc · .pad min-height와 같게: 계산기 250px, 그림판 칸 120px)
+const split = $('#split');
+split.onpointerdown = e => {
+  split.setPointerCapture(e.pointerId);
+  const top = $('.pad').getBoundingClientRect().top, bottom = calcBox.getBoundingClientRect().bottom;
+  split.onpointermove = m => calcBox.style.height = Math.max(250, Math.min(bottom - m.clientY, bottom - top - 120 - 8)) + 'px';
+  split.onpointerup = () => split.onpointermove = null;
+};
 calcBox.onpointerenter = () => { calcHover = true; calcBox.classList.add('kbd'); };
 calcBox.onpointerleave = () => { calcHover = false; calcBox.classList.remove('kbd'); };
 const inTool = () => document.activeElement === host || calcHover;
